@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { getProjectConfig, readProjectFile } from "@/lib/project";
+import { getProjectConfig, readProjectFile, writeProjectFile } from "@/lib/project";
 import { getGitStatus } from "@/lib/git";
 import { runVerification, type VerificationCheck } from "@/lib/verify";
 
@@ -31,5 +31,15 @@ export async function runAudit() {
   const undocumented = localNames.filter((name) => !documentedNames.has(name));
   checks.push({ name:"Environment documentation", ok: undocumented.length === 0, detail: undocumented.length ? `Undocumented: ${undocumented.join(", ")}` : undefined });
 
-  return { ok: checks.every((c) => c.ok), checks, generatedAt: new Date().toISOString() };
+  const result = { ok: checks.every((c) => c.ok), checks, generatedAt: new Date().toISOString() };
+  await writeProjectFile("reports/audit-latest.md", [
+    "# Final Audit",
+    "",
+    `Generated: ${result.generatedAt}`,
+    `Result: ${result.ok ? "ready" : "blocked"}`,
+    "",
+    ...checks.map((check) => `- [${check.ok ? "x" : " "}] ${check.name}${check.detail ? " — " + check.detail : ""}`),
+    "",
+  ].join("\n"), config.repoPath);
+  return result;
 }

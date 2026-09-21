@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { getProjectConfig, readProjectFile, writeProjectFile } from "@/lib/project";
 import { runVerification } from "@/lib/verify";
+import { readLastRun, sameRepo, writeLastRun } from "@/lib/last-run";
 
 export type Activity = {
   at: string;
@@ -13,10 +14,12 @@ export type Activity = {
 export type ExecutionState = {
   running: boolean;
   blocked?: boolean;
+  repoPath?: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   exitCode: number | null;
   verificationOk?: boolean | null;
+  status?: "passed" | "failed" | null;
   activities: Activity[];
   finalMessage: string | null;
 };
@@ -27,7 +30,7 @@ const lockPath = path.join(process.cwd(), ".architect-runtime", "execution.lock"
 const recoveryMessage = "A previous milestone run may still own Codex. Inspect .architect-runtime/execution.lock and the recorded process before clearing it.";
 
 function initialState(): ExecutionState {
-  return { running: false, startedAt: null, finishedAt: null, exitCode: null, verificationOk: null, activities: [], finalMessage: null };
+  return { running: false, repoPath: null, startedAt: null, finishedAt: null, exitCode: null, verificationOk: null, status: null, activities: [], finalMessage: null };
 }
 if (!g.__architectExecution) g.__architectExecution = initialState();
 
@@ -36,8 +39,27 @@ export function getExecutionState() {
 }
 
 export async function getExecutionStatus(): Promise<ExecutionState> {
-  const state = getExecutionState();
+  let state = getExecutionState();
   if (state.running) return state;
+  const config = await getProjectConfig();
+  if (state.repoPath && (!config || !sameRepo(state.repoPath, config.repoPath))) {
+    g.__architectExecution = initialState();
+    state = getExecutionState();
+  }
+  if (!state.finishedAt && config) {
+    const previous = await readLastRun(config.repoPath);
+    if (previous) {
+      Object.assign(state, {
+        repoPath: previous.repoPath,
+        startedAt: previous.startedAt,
+        finishedAt: previous.finishedAt,
+        exitCode: previous.codexExitCode,
+        verificationOk: previous.verificationPassed,
+        status: previous.status,
+        finalMessage: previous.finalMessage,
+      });
+    }
+  }
   const locked = await fs.stat(lockPath).then(() => true, () => false);
   return locked ? { ...state, blocked: true, finalMessage: recoveryMessage } : state;
 }
@@ -73,22 +95,42 @@ function sanitize(input: string) {
     .replace(/((?:API|SECRET|TOKEN|KEY)[A-Z0-9_]*\s*[=:]\s*)[^\s]+/gi, "$1[REDACTED]");
 }
 
-function summarizeCodexEvent(line: string) {
+function summarizeCodexEvent(line: string): string | null {
   try {
-    const e = JSON.parse(line);
-    const type = String(e.type || e.event || "event");
-    const msg =
-      e.message?.content?.[0]?.text ||
-      e.message?.content ||
-      e.item?.text ||
-      e.text ||
-      e.command ||
-      e.status ||
-      "";
-    return msg ? `${type}: ${typeof msg === "string" ? msg : JSON.stringify(msg)}` : type;
+    const event = JSON.parse(line) as {
+      type?: string;
+      message?: string;
+      item?: { type?: string; text?: string; command?: string; exit_code?: number; changes?: { path?: string; kind?: string }[] };
+    };
+    const item = event.item;
+    if (event.type === "item.completed" && item?.type === "agent_message" && item.text) return `Agent: ${item.text}`;
+    if (item?.type === "command_execution" && item.command) {
+      if (event.type === "item.started") return `Running: ${item.command.slice(0, 300)}`;
+      if (event.type === "item.completed") return `Command exit ${item.exit_code ?? "?"}: ${item.command.slice(0, 300)}`;
+    }
+    if (event.type === "item.completed" && item?.type === "file_change") {
+      const files = item.changes?.map((change) => change.path).filter(Boolean).slice(0, 8).join(", ");
+      return files ? `Files changed: ${files}` : "File changes completed.";
+    }
+    if (event.type === "turn.completed") return "Codex turn completed.";
+    if (event.type === "turn.failed" || event.type === "error") return `Codex error: ${event.message || line.slice(0, 500)}`;
+    return null;
   } catch {
-    return line;
+    return line.slice(0, 500);
   }
+}
+
+async function persistFinishedState(state: ExecutionState) {
+  if (!state.repoPath || !state.startedAt || !state.finishedAt || !state.status || !state.finalMessage) return;
+  await writeLastRun({
+    repoPath: state.repoPath,
+    startedAt: state.startedAt,
+    finishedAt: state.finishedAt,
+    codexExitCode: state.exitCode,
+    verificationPassed: state.verificationOk === true,
+    status: state.status,
+    finalMessage: state.finalMessage,
+  });
 }
 
 async function readExecutionPrompt(repoPath: string) {
@@ -128,20 +170,28 @@ export async function startExecution() {
   await acquireExecutionLock(config.repoPath);
 
   state.running = true;
+  state.repoPath = config.repoPath;
   state.startedAt = new Date().toISOString();
   state.finishedAt = null;
   state.exitCode = null;
   state.verificationOk = null;
+  state.status = null;
   state.activities = [];
   state.finalMessage = null;
   push("info", "Starting Codex for the current milestone.");
 
   let prompt: string;
+  let previousLatest: string | null;
   try {
     prompt = await readExecutionPrompt(config.repoPath);
+    previousLatest = await readProjectFile("reports/latest.md", config.repoPath);
   } catch (error) {
     state.running = false;
     state.finishedAt = new Date().toISOString();
+    state.exitCode = 1;
+    state.status = "failed";
+    state.finalMessage = "Unable to prepare the Codex run.";
+    await persistFinishedState(state).catch((cause) => push("error", `Unable to save last-run status: ${String(cause)}`));
     await fs.unlink(lockPath).catch(() => {});
     throw error;
   }
@@ -158,6 +208,10 @@ export async function startExecution() {
   } catch (error) {
     state.running = false;
     state.finishedAt = new Date().toISOString();
+    state.exitCode = 1;
+    state.status = "failed";
+    state.finalMessage = "Unable to start Codex.";
+    await persistFinishedState(state).catch((cause) => push("error", `Unable to save last-run status: ${String(cause)}`));
     await fs.unlink(lockPath).catch(() => {});
     throw error;
   }
@@ -173,7 +227,7 @@ export async function startExecution() {
     stdoutBuffer = lines.pop() || "";
     for (const line of lines.filter(Boolean)) {
       const summary = summarizeCodexEvent(line);
-      push("codex", summary);
+      if (summary) push("codex", summary);
     }
   });
 
@@ -191,7 +245,8 @@ export async function startExecution() {
   child.on("close", async (code) => {
     try {
       if (stdoutBuffer.trim()) {
-        push("codex", summarizeCodexEvent(stdoutBuffer));
+        const summary = summarizeCodexEvent(stdoutBuffer);
+        if (summary) push("codex", summary);
       }
       if (stderrBuffer.trim()) push("codex", stderrBuffer);
       state.exitCode = code ?? 1;
@@ -204,28 +259,49 @@ export async function startExecution() {
         push(check.ok ? "success" : "error", `${check.name}: ${check.ok ? "PASS" : "FAIL"}${check.detail ? " — " + check.detail : ""}`);
       }
 
-      const report = [
-        "# Latest Execution Report",
+      const codexReport = await readProjectFile("reports/latest.md", config.repoPath);
+      const codexUpdated = Boolean(codexReport && codexReport !== previousLatest);
+      if (codexUpdated) await writeProjectFile("reports/codex-latest.md", codexReport!, config.repoPath);
+
+      const verificationReport = [
+        "# Deterministic Verification",
         "",
         `Generated: ${new Date().toISOString()}`,
         `Codex exit code: ${code ?? 1}`,
         "",
-        "## Verification",
         ...verification.checks.map((c) => `- [${c.ok ? "x" : " "}] ${c.name}${c.detail ? " — " + c.detail : ""}`),
         "",
-        "## Notes",
-        "See the dashboard Activity view for the structured Codex event stream.",
+      ].join("\n");
+      await writeProjectFile("reports/verification-latest.md", verificationReport, config.repoPath);
+
+      state.status = code === 0 && verification.ok ? "passed" : "failed";
+      state.finalMessage = state.status === "passed" ? "Milestone execution finished and verification passed." : "Milestone execution finished with failures.";
+      const summary = [
+        "# Latest Execution",
+        "",
+        `Generated: ${new Date().toISOString()}`,
+        `Status: ${state.status}`,
+        `Codex exit code: ${code ?? 1}`,
+        `Deterministic verification: ${verification.ok ? "passed" : "failed"}`,
+        "",
+        codexUpdated ? "Codex implementation details: [codex-latest.md](codex-latest.md)" : "Codex did not update its detailed report during this run.",
+        "Verification details: [verification-latest.md](verification-latest.md)",
+        "Final audit, if run: [audit-latest.md](audit-latest.md)",
         "",
       ].join("\n");
-      await writeProjectFile("reports/latest.md", report, config.repoPath);
-      state.finalMessage = code === 0 && verification.ok ? "Milestone execution finished and verification passed." : "Milestone execution finished with failures.";
+      await writeProjectFile("reports/latest.md", summary, config.repoPath);
     } catch (error) {
-      state.verificationOk = false;
+      state.status = "failed";
       push("error", error instanceof Error ? error.message : "Post-execution verification failed.");
       state.finalMessage = "Execution completed, but post-run processing failed.";
     } finally {
       state.running = false;
       state.finishedAt = new Date().toISOString();
+      await persistFinishedState(state).catch((error) => {
+        push("error", `Unable to save last-run status: ${String(error)}`);
+        state.status = "failed";
+        state.finalMessage = "Execution finished, but last-run status could not be saved.";
+      });
       await fs.unlink(lockPath).catch(() => {});
     }
   });

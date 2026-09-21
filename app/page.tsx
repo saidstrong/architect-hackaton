@@ -4,13 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Config = { repoPath: string } | null;
 type Activity = { at: string; kind: string; message: string };
-type Execution = { running: boolean; blocked?: boolean; startedAt: string|null; finishedAt: string|null; exitCode: number|null; verificationOk?: boolean|null; activities: Activity[]; finalMessage: string|null };
+type Execution = { running: boolean; blocked?: boolean; startedAt: string|null; finishedAt: string|null; exitCode: number|null; verificationOk?: boolean|null; status?: "passed"|"failed"|null; activities: Activity[]; finalMessage: string|null };
 type GitState = { status: string[]; commits: {sha:string;date:string;message:string}[]; diffStat:string } | null;
 type RequestItem = { file:string; type:string; name?:string; reason?:string; required?:boolean; [key:string]:unknown };
 type Evidence = { id:string; image:string; createdAt:string; url:string; viewport:{width:number;height:number}; title?:string; consoleErrors:string[]; failedRequests:string[] };
 type Audit = { ok:boolean; generatedAt:string; checks:{name:string;ok:boolean;detail?:string}[] };
 
-const FILES = ["TASK.md","ARCHITECTURE.md","PROJECT_STATE.md","ACCEPTANCE.md","DECISIONS.md","HOURLY_LOG.md","reports/latest.md"];
+const FILES = ["TASK.md","ARCHITECTURE.md","PROJECT_STATE.md","ACCEPTANCE.md","DECISIONS.md","HOURLY_LOG.md","reports/latest.md","reports/codex-latest.md","reports/verification-latest.md","reports/audit-latest.md"];
 
 async function jsonFetch<T>(url:string, init?:RequestInit):Promise<T> {
   const res = await fetch(url, { ...init, headers: { "content-type":"application/json", ...(init?.headers || {}) }, cache:"no-store" });
@@ -177,6 +177,7 @@ export default function Home() {
     try {
       const data = await jsonFetch<{audit:Audit}>("/api/audit",{method:"POST"});
       setAudit(data.audit);
+      if (activeFile === "reports/audit-latest.md" && !fileDirty) await loadFile(activeFile);
     } catch(e) { setError(e instanceof Error ? e.message : "Audit failed."); }
     finally { setAuditing(false); }
   }
@@ -187,8 +188,8 @@ export default function Home() {
     const done = (fileContent.match(/- \[[xX]\]/g) || []).length;
     return {total,done};
   },[activeFile,fileContent]);
-  const runPassed = execution.exitCode === 0 && (execution.verificationOk === true ||
-    (execution.verificationOk === undefined && execution.finalMessage === "Milestone execution finished and verification passed."));
+  const runPassed = execution.status === "passed" || (execution.status === undefined && execution.exitCode === 0 &&
+    (execution.verificationOk === true || (execution.verificationOk === undefined && execution.finalMessage === "Milestone execution finished and verification passed.")));
 
   if (loading) return <main className="center-screen"><div className="loader"/><p>Opening Architect…</p></main>;
 

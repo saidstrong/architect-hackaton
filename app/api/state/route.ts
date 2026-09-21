@@ -3,7 +3,7 @@ import { readProjectFile, writeProjectFile } from "@/lib/project";
 
 export const runtime = "nodejs";
 
-const allowed = new Set(["TASK.md","ARCHITECTURE.md","PROJECT_STATE.md","ACCEPTANCE.md","DECISIONS.md","HOURLY_LOG.md","reports/latest.md"]);
+const allowed = new Set(["TASK.md","ARCHITECTURE.md","PROJECT_STATE.md","ACCEPTANCE.md","DECISIONS.md","HOURLY_LOG.md","reports/latest.md","reports/codex-latest.md","reports/verification-latest.md","reports/audit-latest.md"]);
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
