@@ -12,6 +12,7 @@ export type Activity = {
 
 export type ExecutionState = {
   running: boolean;
+  blocked?: boolean;
   startedAt: string | null;
   finishedAt: string | null;
   exitCode: number | null;
@@ -21,6 +22,8 @@ export type ExecutionState = {
 
 type RuntimeGlobal = typeof globalThis & { __architectExecution?: ExecutionState };
 const g = globalThis as RuntimeGlobal;
+const lockPath = path.join(process.cwd(), ".architect-runtime", "execution.lock");
+const recoveryMessage = "A previous milestone run may still own Codex. Inspect .architect-runtime/execution.lock and the recorded process before clearing it.";
 
 function initialState(): ExecutionState {
   return { running: false, startedAt: null, finishedAt: null, exitCode: null, activities: [], finalMessage: null };
@@ -29,6 +32,32 @@ if (!g.__architectExecution) g.__architectExecution = initialState();
 
 export function getExecutionState() {
   return g.__architectExecution!;
+}
+
+export async function getExecutionStatus(): Promise<ExecutionState> {
+  const state = getExecutionState();
+  if (state.running) return state;
+  const locked = await fs.stat(lockPath).then(() => true, () => false);
+  return locked ? { ...state, blocked: true, finalMessage: recoveryMessage } : state;
+}
+
+async function acquireExecutionLock(repoPath: string) {
+  await fs.mkdir(path.dirname(lockPath), { recursive: true });
+  let handle: fs.FileHandle;
+  try {
+    handle = await fs.open(lockPath, "wx");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(recoveryMessage);
+    throw error;
+  }
+  try {
+    await handle.writeFile(JSON.stringify({ serverPid: process.pid, repoPath, startedAt: new Date().toISOString() }, null, 2));
+  } catch (error) {
+    await handle.close();
+    await fs.unlink(lockPath).catch(() => {});
+    throw error;
+  }
+  await handle.close();
 }
 
 function push(kind: Activity["kind"], message: string) {
@@ -61,10 +90,10 @@ function summarizeCodexEvent(line: string) {
   }
 }
 
-async function readExecutionPrompt() {
-  const state = (await readProjectFile("PROJECT_STATE.md")) || "";
-  const acceptance = (await readProjectFile("ACCEPTANCE.md")) || "";
-  const task = (await readProjectFile("TASK.md")) || "";
+async function readExecutionPrompt(repoPath: string) {
+  const state = (await readProjectFile("PROJECT_STATE.md", repoPath)) || "";
+  const acceptance = (await readProjectFile("ACCEPTANCE.md", repoPath)) || "";
+  const task = (await readProjectFile("TASK.md", repoPath)) || "";
   return `You are the implementation agent for a time-boxed hackathon project.
 
 Read AGENTS.md and the .architect directory before changing code.
@@ -95,6 +124,7 @@ export async function startExecution() {
   if (state.running) throw new Error("Codex is already running.");
   const config = await getProjectConfig();
   if (!config) throw new Error("No target repository selected.");
+  await acquireExecutionLock(config.repoPath);
 
   state.running = true;
   state.startedAt = new Date().toISOString();
@@ -104,17 +134,36 @@ export async function startExecution() {
   state.finalMessage = null;
   push("info", "Starting Codex for the current milestone.");
 
-  const prompt = await readExecutionPrompt();
-  const child = spawn("codex", ["exec", "--json", "--sandbox", "workspace-write", prompt], {
-    cwd: config.repoPath,
-    env: process.env,
-    shell: process.platform === "win32",
-    windowsHide: true,
-  });
+  let prompt: string;
+  try {
+    prompt = await readExecutionPrompt(config.repoPath);
+  } catch (error) {
+    state.running = false;
+    state.finishedAt = new Date().toISOString();
+    await fs.unlink(lockPath).catch(() => {});
+    throw error;
+  }
+  let child;
+  try {
+    // On Windows the CLI is usually a .cmd shim, so shell mode is necessary.
+    // Keep project text out of shell arguments and send it over stdin instead.
+    child = spawn("codex", ["exec", "--json", "--sandbox", "workspace-write", "-"], {
+      cwd: config.repoPath,
+      env: process.env,
+      shell: process.platform === "win32",
+      windowsHide: true,
+    });
+  } catch (error) {
+    state.running = false;
+    state.finishedAt = new Date().toISOString();
+    await fs.unlink(lockPath).catch(() => {});
+    throw error;
+  }
+  child.stdin?.on("error", (error) => push("error", `Unable to send Codex prompt: ${error.message}`));
+  child.stdin?.end(prompt);
 
   let stdoutBuffer = "";
   let stderrBuffer = "";
-  let finalOutput = "";
 
   child.stdout?.on("data", (chunk) => {
     stdoutBuffer += chunk.toString();
@@ -123,7 +172,6 @@ export async function startExecution() {
     for (const line of lines.filter(Boolean)) {
       const summary = summarizeCodexEvent(line);
       push("codex", summary);
-      finalOutput += line + "\n";
     }
   });
 
@@ -142,7 +190,6 @@ export async function startExecution() {
     try {
       if (stdoutBuffer.trim()) {
         push("codex", summarizeCodexEvent(stdoutBuffer));
-        finalOutput += stdoutBuffer;
       }
       if (stderrBuffer.trim()) push("codex", stderrBuffer);
       state.exitCode = code ?? 1;
@@ -167,7 +214,7 @@ export async function startExecution() {
         "See the dashboard Activity view for the structured Codex event stream.",
         "",
       ].join("\n");
-      await writeProjectFile("reports/latest.md", report);
+      await writeProjectFile("reports/latest.md", report, config.repoPath);
       state.finalMessage = verification.ok ? "Milestone execution finished and verification passed." : "Milestone execution finished with verification failures.";
     } catch (error) {
       push("error", error instanceof Error ? error.message : "Post-execution verification failed.");
@@ -175,6 +222,7 @@ export async function startExecution() {
     } finally {
       state.running = false;
       state.finishedAt = new Date().toISOString();
+      await fs.unlink(lockPath).catch(() => {});
     }
   });
 

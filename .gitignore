@@ -5,5 +5,8 @@ node_modules/
 !.env.example
 .architect/secrets.json
 .architect/runtime/
+.architect-runtime/
+.playwright-cli/
+*.tsbuildinfo
 .DS_Store
 *.log

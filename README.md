@@ -26,7 +26,7 @@ Architect removes manual prompt-copying and terminal monitoring without replacin
 
 ## Requirements
 
-- Node.js 20+
+- Node.js 20.9+
 - Git
 - OpenAI Codex CLI installed and authenticated
 - A local target Git repository
@@ -40,11 +40,12 @@ npx playwright install chromium
 ## Run
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
+The development and local production servers bind to `127.0.0.1`.
 
 Enter the absolute path to the hackathon/project repository.
 
@@ -72,10 +73,12 @@ The control application itself stores only the currently selected local reposito
 The **Run milestone** button launches:
 
 ```bash
-codex exec --json --sandbox workspace-write "<current milestone prompt>"
+codex exec --json --sandbox workspace-write -
 ```
 
-Codex is instructed to implement only the current milestone, update project state, and request approval before major architecture changes.
+Architect sends the current milestone prompt over stdin. Codex is instructed to implement only that milestone, update project state, and request approval before major architecture changes.
+
+Architect holds `.architect-runtime/execution.lock` during a milestone run. If the app stops mid-run, it blocks another run until you inspect the recorded process and confirm the earlier Codex process has ended before clearing the lock.
 
 Current Codex documentation recommends explicit `workspace-write` sandboxing for non-interactive automation rather than the deprecated `--full-auto` compatibility flag.
 
@@ -102,6 +105,7 @@ After Codex exits, Architect automatically runs available package scripts:
 - `npm run build`
 
 Missing scripts are reported as skipped rather than failed.
+Automatic verification currently supports npm projects with at least one of these scripts. Other project types are marked unverified in the audit.
 
 ## Browser evidence
 

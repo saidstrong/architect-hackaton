@@ -14,7 +14,9 @@ export function runCommand(command: string, args: string[], cwd: string, env?: N
     const child = spawn(command, args, {
       cwd,
       env: { ...process.env, ...env },
-      shell: process.platform === "win32",
+      // npm is a .cmd shim on Windows; Git is an executable and must receive
+      // its argument array directly (commit messages and format strings contain spaces/pipes).
+      shell: process.platform === "win32" && command === "npm",
       windowsHide: true,
     });
     let stdout = "";

@@ -113,17 +113,17 @@ Do not start the next milestone automatically.
   await fs.writeFile(ignorePath, Array.from(lines).join("\n") + "\n", "utf8");
 }
 
-export async function readProjectFile(relative: string) {
-  const config = await getProjectConfig();
-  if (!config) return null;
-  const full = path.join(config.repoPath, ".architect", relative);
+export async function readProjectFile(relative: string, repoPath?: string) {
+  const selected = repoPath || (await getProjectConfig())?.repoPath;
+  if (!selected) return null;
+  const full = path.join(selected, ".architect", relative);
   return fs.readFile(full, "utf8").catch(() => null);
 }
 
-export async function writeProjectFile(relative: string, content: string) {
-  const config = await getProjectConfig();
-  if (!config) throw new Error("No project selected.");
-  const base = path.join(config.repoPath, ".architect");
+export async function writeProjectFile(relative: string, content: string, repoPath?: string) {
+  const selected = repoPath || (await getProjectConfig())?.repoPath;
+  if (!selected) throw new Error("No project selected.");
+  const base = path.join(selected, ".architect");
   const full = path.resolve(base, relative);
   if (!full.startsWith(path.resolve(base) + path.sep)) throw new Error("Invalid architect file path.");
   await ensureDir(path.dirname(full));

@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { getExecutionState, startExecution } from "@/lib/runtime";
+import { getExecutionStatus, startExecution } from "@/lib/runtime";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  return NextResponse.json(getExecutionState());
+  return NextResponse.json(await getExecutionStatus());
 }
 
 export async function POST() {

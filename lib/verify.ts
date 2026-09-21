@@ -4,12 +4,17 @@ import { runCommand } from "@/lib/process";
 
 export type VerificationCheck = { name: string; ok: boolean; detail?: string };
 
-async function packageScripts(repoPath: string): Promise<Record<string,string>> {
+async function packageScripts(repoPath: string): Promise<{ scripts: Record<string,string>; manager: string } | null> {
   try {
     const pkg = JSON.parse(await fs.readFile(path.join(repoPath, "package.json"), "utf8"));
-    return pkg.scripts || {};
+    let manager = typeof pkg.packageManager === "string" ? pkg.packageManager.split("@")[0] : "npm";
+    if (!pkg.packageManager) {
+      if (await fs.stat(path.join(repoPath, "pnpm-lock.yaml")).then(() => true, () => false)) manager = "pnpm";
+      else if (await fs.stat(path.join(repoPath, "yarn.lock")).then(() => true, () => false)) manager = "yarn";
+    }
+    return { scripts: pkg.scripts || {}, manager };
   } catch {
-    return {};
+    return null;
   }
 }
 
@@ -20,11 +25,11 @@ async function gitSecretCheck(repoPath: string): Promise<VerificationCheck> {
 }
 
 export async function runVerification(repoPath: string) {
-  const scripts = await packageScripts(repoPath);
+  const project = await packageScripts(repoPath);
   const checks: VerificationCheck[] = [];
 
   const runScript = async (name: string) => {
-    if (!scripts[name]) {
+    if (!project?.scripts[name]) {
       checks.push({ name, ok: true, detail: "No script configured; skipped." });
       return;
     }
@@ -36,9 +41,17 @@ export async function runVerification(repoPath: string) {
     });
   };
 
-  await runScript("typecheck");
-  await runScript("test");
-  await runScript("build");
+  if (!project) {
+    checks.push({ name: "Project verification", ok: false, detail: "No readable package.json; configure verification for this project before treating it as ready." });
+  } else if (project.manager !== "npm") {
+    checks.push({ name: "Project verification", ok: false, detail: `${project.manager} projects are not yet supported by automatic verification.` });
+  } else if (!project.scripts.typecheck && !project.scripts.test && !project.scripts.build) {
+    checks.push({ name: "Project verification", ok: false, detail: "No typecheck, test, or build script is configured." });
+  } else {
+    await runScript("typecheck");
+    await runScript("test");
+    await runScript("build");
+  }
   checks.push(await gitSecretCheck(repoPath));
 
   return { ok: checks.every((c) => c.ok), checks };

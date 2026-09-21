@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Config = { repoPath: string } | null;
 type Activity = { at: string; kind: string; message: string };
-type Execution = { running: boolean; startedAt: string|null; finishedAt: string|null; exitCode: number|null; activities: Activity[]; finalMessage: string|null };
+type Execution = { running: boolean; blocked?: boolean; startedAt: string|null; finishedAt: string|null; exitCode: number|null; activities: Activity[]; finalMessage: string|null };
 type GitState = { status: string[]; commits: {sha:string;date:string;message:string}[]; diffStat:string } | null;
 type RequestItem = { file:string; type:string; name?:string; reason?:string; required?:boolean; [key:string]:unknown };
 type Evidence = { id:string; image:string; createdAt:string; url:string; viewport:{width:number;height:number}; title?:string; consoleErrors:string[]; failedRequests:string[] };
@@ -42,7 +42,8 @@ export default function Home() {
   const [captureSize,setCaptureSize] = useState("1440x900");
   const [capturing,setCapturing] = useState(false);
   const [audit,setAudit] = useState<Audit|null>(null);
-  const [auditing,setAuditing] = useState(false);\n  const [creatingDryRun,setCreatingDryRun] = useState(false);
+  const [auditing,setAuditing] = useState(false);
+  const [creatingDryRun,setCreatingDryRun] = useState(false);
 
   const refreshProject = useCallback(async () => {
     const data = await jsonFetch<{config:Config}>("/api/project");
@@ -210,16 +211,16 @@ export default function Home() {
         <div className="repo-path">{config.repoPath}</div>
       </div>
       <div className="top-actions">
-        <span className={`status-pill ${execution.running ? "working" : "ready"}`}><i/>{execution.running ? "CODEX WORKING" : "READY"}</span>
+        <span className={`status-pill ${execution.running ? "working" : execution.blocked ? "blocked" : "ready"}`}><i/>{execution.running ? "CODEX WORKING" : execution.blocked ? "RECOVERY REQUIRED" : "READY"}</span>
         <button className="secondary" onClick={runAuditNow} disabled={auditing}>{auditing ? "Auditing…" : "Final audit"}</button>
-        <button className="primary" onClick={runMilestone} disabled={execution.running}>{execution.running ? "Running…" : "Run milestone"}</button>
+        <button className="primary" onClick={runMilestone} disabled={execution.running || execution.blocked}>{execution.running ? "Running…" : "Run milestone"}</button>
       </div>
     </header>
 
     {error && <div className="global-error">{error}<button onClick={()=>setError("")}>×</button></div>}
 
     <section className="metrics">
-      <Metric label="Codex" value={execution.running ? "Working" : execution.exitCode === 0 ? "Last run passed" : execution.exitCode ? "Last run failed" : "Idle"} tone={execution.running ? "blue" : execution.exitCode === 0 ? "green" : "neutral"} />
+      <Metric label="Codex" value={execution.running ? "Working" : execution.blocked ? "Recovery required" : execution.exitCode === 0 ? "Last run passed" : execution.exitCode ? "Last run failed" : "Idle"} tone={execution.running ? "blue" : execution.exitCode === 0 ? "green" : "neutral"} />
       <Metric label="Requests" value={requests.length ? `${requests.length} action required` : "None"} tone={requests.length ? "amber" : "green"} />
       <Metric label="Git changes" value={git ? `${git.status.length} path(s)` : "—"} tone={git?.status.length ? "amber" : "green"} />
       <Metric label="Evidence" value={evidence.length ? `${evidence.length} capture(s)` : "None yet"} tone="neutral" />

@@ -133,6 +133,12 @@ function validateTarget(targetPath: string) {
 
 export async function createDryRunRepo(targetPath: string) {
   const resolved = validateTarget(targetPath);
+  for (let parent = path.dirname(resolved); ; parent = path.dirname(parent)) {
+    if (await fs.stat(path.join(parent, ".git")).catch(() => null)) {
+      throw new Error("Dry-run folder cannot be inside another Git repository.");
+    }
+    if (parent === path.dirname(parent)) break;
+  }
   const existing = await fs.stat(resolved).catch(() => null);
   if (existing && !existing.isDirectory()) throw new Error("Target path exists and is not a directory.");
   if (existing) {
@@ -158,7 +164,8 @@ export async function createDryRunRepo(targetPath: string) {
   await writeProjectFile("ARCHITECTURE.md", ARCHITECTURE);
   await writeProjectFile("DECISIONS.md", "# Decisions\n\n- Dry run initialized from Architect's generic practice template.\n");
 
-  await runCommand("git", ["add", "."], resolved);
+  const add = await runCommand("git", ["add", "."], resolved);
+  if (add.exitCode !== 0) throw new Error("git add failed: " + (add.stderr || add.stdout));
   const commit = await runCommand("git", ["commit", "-m", "chore: initialize architect dry run"], resolved);
 
   return {
