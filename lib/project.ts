@@ -40,6 +40,7 @@ export async function ensureProjectFiles(repoPath: string) {
   const dir = path.join(repoPath, ".architect");
   await ensureDir(path.join(dir, "reports"));
   await ensureDir(path.join(dir, "evidence"));
+  await ensureDir(path.join(dir, "requests"));
 
   const defaults: Record<string, string> = {
     "TASK.md": "# Task\n\nPaste the official task here.\n",
@@ -60,6 +61,56 @@ export async function ensureProjectFiles(repoPath: string) {
       await fs.writeFile(target, content, "utf8");
     }
   }
+
+  const agentsPath = path.join(repoPath, "AGENTS.md");
+  try {
+    await fs.access(agentsPath);
+  } catch {
+    await fs.writeFile(
+      agentsPath,
+      `# Hackathon Engineering Rules
+
+## Objective
+Maximize verified task compliance and evaluation score inside the competition time limit.
+
+## Priority
+1. Mandatory task requirements
+2. Working end-to-end workflow
+3. Technical correctness
+4. Reproducibility
+5. Reliability and security
+6. Documentation
+7. Differentiating functionality
+8. UI polish
+
+## Scope control
+Do not introduce authentication, a database, a new external service, a major framework, a paid resource, or an additional AI-agent layer unless the task requires it or approval is recorded.
+
+## Execution
+Work on one milestone at a time. Read .architect/TASK.md, PROJECT_STATE.md, ACCEPTANCE.md, ARCHITECTURE.md, and DECISIONS.md before implementation.
+
+If a secret is required, create .architect/requests/secret-<NAME>.json with:
+{"type":"secret","name":"<NAME>","reason":"why it is needed","required":true}
+
+If a major architecture or external-service decision is required, create .architect/requests/approval-<short-name>.json describing the decision and expected benefit/cost.
+
+Never invent credentials. Never write secret values into markdown, logs, screenshots, or Git history.
+
+Before declaring a milestone complete, run relevant tests and update .architect/PROJECT_STATE.md and .architect/reports/latest.md with factual results only.
+
+Do not start the next milestone automatically.
+`,
+      "utf8"
+    );
+  }
+
+  const ignorePath = path.join(repoPath, ".gitignore");
+  let ignore = "";
+  try { ignore = await fs.readFile(ignorePath, "utf8"); } catch {}
+  const additions = [".env.local", ".architect/runtime/"];
+  const lines = new Set(ignore.split(/\r?\n/).filter(Boolean));
+  for (const item of additions) lines.add(item);
+  await fs.writeFile(ignorePath, Array.from(lines).join("\n") + "\n", "utf8");
 }
 
 export async function readProjectFile(relative: string) {
