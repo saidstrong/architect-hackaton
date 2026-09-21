@@ -42,7 +42,7 @@ export default function Home() {
   const [captureSize,setCaptureSize] = useState("1440x900");
   const [capturing,setCapturing] = useState(false);
   const [audit,setAudit] = useState<Audit|null>(null);
-  const [auditing,setAuditing] = useState(false);
+  const [auditing,setAuditing] = useState(false);\n  const [creatingDryRun,setCreatingDryRun] = useState(false);
 
   const refreshProject = useCallback(async () => {
     const data = await jsonFetch<{config:Config}>("/api/project");
@@ -102,6 +102,18 @@ export default function Home() {
     } catch(e) {
       setError(e instanceof Error ? e.message : "Unable to select project.");
     }
+  }
+
+  async function createDryRun() {
+    setCreatingDryRun(true); setError("");
+    try {
+      const data = await jsonFetch<{result:{repoPath:string;committed:boolean;commitNote:string}}>("/api/dry-run",{method:"POST",body:JSON.stringify({repoPath})});
+      setConfig({repoPath:data.result.repoPath});
+      setRepoPath(data.result.repoPath);
+      await Promise.all([refreshLive(),loadFile(activeFile)]);
+    } catch(e) {
+      setError(e instanceof Error ? e.message : "Unable to create dry run.");
+    } finally { setCreatingDryRun(false); }
   }
 
   async function saveFile() {
@@ -181,9 +193,12 @@ export default function Home() {
         <p className="muted">Connect a local Git repository. Architect keeps project state in the repository, runs Codex in a workspace-write sandbox, verifies results, and captures evidence.</p>
         <label>Target repository path</label>
         <input value={repoPath} onChange={(e)=>setRepoPath(e.target.value)} placeholder="C:\Users\Said\Projects\hackalem-project" />
-        <button className="primary" onClick={selectProject} disabled={!repoPath.trim()}>Connect repository</button>
+        <div className="setup-actions">
+          <button className="primary" onClick={selectProject} disabled={!repoPath.trim() || creatingDryRun}>Connect repository</button>
+          <button className="secondary" onClick={createDryRun} disabled={!repoPath.trim() || creatingDryRun}>{creatingDryRun ? "Creating…" : "Create Finance dry run"}</button>
+        </div>
         {error && <div className="error-box">{error}</div>}
-        <p className="micro">The selected folder must already be a Git repository. No cloud database is used.</p>
+        <p className="micro"><strong>Connect repository</strong> expects an existing Git repo. <strong>Create Finance dry run</strong> expects an empty/nonexistent absolute folder and initializes Git + a realistic practice task automatically.</p>
       </section>
     </main>;
   }
