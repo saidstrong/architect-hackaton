@@ -33,7 +33,9 @@ export async function runVerification(repoPath: string) {
       checks.push({ name, ok: true, detail: "No script configured; skipped." });
       return;
     }
-    const r = await runCommand("npm", ["run", name], repoPath);
+    // Architect runs in development mode, but the target build must run with
+    // Next's production environment rather than inheriting the dev server's.
+    const r = await runCommand("npm", ["run", name], repoPath, name === "build" ? { NODE_ENV: "production" } : undefined);
     checks.push({
       name,
       ok: r.exitCode === 0,

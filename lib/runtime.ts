@@ -16,6 +16,7 @@ export type ExecutionState = {
   startedAt: string | null;
   finishedAt: string | null;
   exitCode: number | null;
+  verificationOk?: boolean | null;
   activities: Activity[];
   finalMessage: string | null;
 };
@@ -26,7 +27,7 @@ const lockPath = path.join(process.cwd(), ".architect-runtime", "execution.lock"
 const recoveryMessage = "A previous milestone run may still own Codex. Inspect .architect-runtime/execution.lock and the recorded process before clearing it.";
 
 function initialState(): ExecutionState {
-  return { running: false, startedAt: null, finishedAt: null, exitCode: null, activities: [], finalMessage: null };
+  return { running: false, startedAt: null, finishedAt: null, exitCode: null, verificationOk: null, activities: [], finalMessage: null };
 }
 if (!g.__architectExecution) g.__architectExecution = initialState();
 
@@ -130,6 +131,7 @@ export async function startExecution() {
   state.startedAt = new Date().toISOString();
   state.finishedAt = null;
   state.exitCode = null;
+  state.verificationOk = null;
   state.activities = [];
   state.finalMessage = null;
   push("info", "Starting Codex for the current milestone.");
@@ -197,6 +199,7 @@ export async function startExecution() {
 
       push("verify", "Running deterministic verification.");
       const verification = await runVerification(config.repoPath);
+      state.verificationOk = verification.ok;
       for (const check of verification.checks) {
         push(check.ok ? "success" : "error", `${check.name}: ${check.ok ? "PASS" : "FAIL"}${check.detail ? " — " + check.detail : ""}`);
       }
@@ -215,8 +218,9 @@ export async function startExecution() {
         "",
       ].join("\n");
       await writeProjectFile("reports/latest.md", report, config.repoPath);
-      state.finalMessage = verification.ok ? "Milestone execution finished and verification passed." : "Milestone execution finished with verification failures.";
+      state.finalMessage = code === 0 && verification.ok ? "Milestone execution finished and verification passed." : "Milestone execution finished with failures.";
     } catch (error) {
+      state.verificationOk = false;
       push("error", error instanceof Error ? error.message : "Post-execution verification failed.");
       state.finalMessage = "Execution completed, but post-run processing failed.";
     } finally {

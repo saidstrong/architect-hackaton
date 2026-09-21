@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Config = { repoPath: string } | null;
 type Activity = { at: string; kind: string; message: string };
-type Execution = { running: boolean; blocked?: boolean; startedAt: string|null; finishedAt: string|null; exitCode: number|null; activities: Activity[]; finalMessage: string|null };
+type Execution = { running: boolean; blocked?: boolean; startedAt: string|null; finishedAt: string|null; exitCode: number|null; verificationOk?: boolean|null; activities: Activity[]; finalMessage: string|null };
 type GitState = { status: string[]; commits: {sha:string;date:string;message:string}[]; diffStat:string } | null;
 type RequestItem = { file:string; type:string; name?:string; reason?:string; required?:boolean; [key:string]:unknown };
 type Evidence = { id:string; image:string; createdAt:string; url:string; viewport:{width:number;height:number}; title?:string; consoleErrors:string[]; failedRequests:string[] };
@@ -93,6 +93,10 @@ export default function Home() {
     }, execution.running ? 1200 : 4000);
     return () => window.clearInterval(id);
   },[config,execution.running,refreshLive]);
+
+  useEffect(() => {
+    if (config && execution.finishedAt && !fileDirty) loadFile(activeFile).catch(() => {});
+  },[config,execution.finishedAt,fileDirty,activeFile,loadFile]);
 
   async function selectProject() {
     setError("");
@@ -183,6 +187,8 @@ export default function Home() {
     const done = (fileContent.match(/- \[[xX]\]/g) || []).length;
     return {total,done};
   },[activeFile,fileContent]);
+  const runPassed = execution.exitCode === 0 && (execution.verificationOk === true ||
+    (execution.verificationOk === undefined && execution.finalMessage === "Milestone execution finished and verification passed."));
 
   if (loading) return <main className="center-screen"><div className="loader"/><p>Opening Architect…</p></main>;
 
@@ -220,7 +226,7 @@ export default function Home() {
     {error && <div className="global-error">{error}<button onClick={()=>setError("")}>×</button></div>}
 
     <section className="metrics">
-      <Metric label="Codex" value={execution.running ? "Working" : execution.blocked ? "Recovery required" : execution.exitCode === 0 ? "Last run passed" : execution.exitCode ? "Last run failed" : "Idle"} tone={execution.running ? "blue" : execution.exitCode === 0 ? "green" : "neutral"} />
+      <Metric label="Codex" value={execution.running ? "Working" : execution.blocked ? "Recovery required" : execution.finishedAt ? runPassed ? "Last run passed" : "Last run failed" : "Idle"} tone={execution.running ? "blue" : execution.finishedAt ? runPassed ? "green" : "amber" : "neutral"} />
       <Metric label="Requests" value={requests.length ? `${requests.length} action required` : "None"} tone={requests.length ? "amber" : "green"} />
       <Metric label="Git changes" value={git ? `${git.status.length} path(s)` : "—"} tone={git?.status.length ? "amber" : "green"} />
       <Metric label="Evidence" value={evidence.length ? `${evidence.length} capture(s)` : "None yet"} tone="neutral" />
@@ -260,7 +266,7 @@ export default function Home() {
         </Panel>
 
         <Panel title="Execution activity" subtitle={execution.startedAt ? `Started ${timeLabel(execution.startedAt)}` : "No run yet"}>
-          {execution.finalMessage && <div className={`run-summary ${execution.exitCode===0 ? "pass" : "fail"}`}>{execution.finalMessage}</div>}
+          {execution.finalMessage && <div className={`run-summary ${runPassed ? "pass" : "fail"}`}>{execution.finalMessage}</div>}
           <div className="activity-stream">
             {execution.activities.length === 0 ? <Empty text="Run the current milestone to see Codex and verification activity."/> :
               [...execution.activities].reverse().slice(0,80).map((item,i)=><div className="activity-row" key={`${item.at}-${i}`}><time>{timeLabel(item.at)}</time><span className={`activity-dot ${item.kind}`}/><p>{item.message}</p></div>)}
