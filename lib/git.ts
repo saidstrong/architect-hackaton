@@ -4,12 +4,16 @@ import { runCommand } from "@/lib/process";
 export async function getGitStatus() {
   const config = await getProjectConfig();
   if (!config) return null;
-  const [status, log, diff] = await Promise.all([
+  const [status, log, diff, branch, head] = await Promise.all([
     runCommand("git", ["status", "--short"], config.repoPath),
     runCommand("git", ["log", "-8", "--pretty=format:%h|%ad|%s", "--date=short"], config.repoPath),
     runCommand("git", ["diff", "--stat"], config.repoPath),
+    runCommand("git", ["branch", "--show-current"], config.repoPath),
+    runCommand("git", ["rev-parse", "--short", "HEAD"], config.repoPath),
   ]);
   return {
+    branch: branch.stdout.trim() || "detached",
+    head: head.stdout.trim() || "—",
     status: status.stdout.trim().split(/\r?\n/).filter(Boolean),
     commits: log.stdout.trim().split(/\r?\n/).filter(Boolean).map((line) => {
       const [sha,date,...message] = line.split("|");

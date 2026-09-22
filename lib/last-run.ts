@@ -9,6 +9,7 @@ export type LastRun = {
   codexExitCode: number | null;
   verificationPassed: boolean;
   status: "passed" | "failed";
+  mode?: "milestone" | "fix";
   finalMessage: string;
 };
 
@@ -29,7 +30,8 @@ export async function readLastRun(repoPath: string): Promise<LastRun | null> {
         (run.codexExitCode !== null && typeof run.codexExitCode !== "number") ||
         typeof run.verificationPassed !== "boolean" ||
         (run.status !== "passed" && run.status !== "failed") ||
-        typeof run.finalMessage !== "string") return null;
+        typeof run.finalMessage !== "string" ||
+        (run.mode !== undefined && run.mode !== "milestone" && run.mode !== "fix")) return null;
     return run as LastRun;
   } catch {
     return null;

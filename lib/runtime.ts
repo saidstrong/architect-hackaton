@@ -21,6 +21,7 @@ export type ExecutionState = {
   exitCode: number | null;
   verificationOk?: boolean | null;
   status?: "passed" | "failed" | null;
+  mode?: "milestone" | "fix";
   activities: Activity[];
   finalMessage: string | null;
 };
@@ -57,6 +58,7 @@ export async function getExecutionStatus(): Promise<ExecutionState> {
         exitCode: previous.codexExitCode,
         verificationOk: previous.verificationPassed,
         status: previous.status,
+        mode: previous.mode || "milestone",
         finalMessage: previous.finalMessage,
       });
     }
@@ -130,6 +132,7 @@ async function persistFinishedState(state: ExecutionState) {
     codexExitCode: state.exitCode,
     verificationPassed: state.verificationOk === true,
     status: state.status,
+    mode: state.mode || "milestone",
     finalMessage: state.finalMessage,
   });
 }
@@ -164,7 +167,15 @@ Rules:
 `;
 }
 
-export async function startExecution() {
+async function readFixPrompt(repoPath: string) {
+  const report = await readProjectFile("reports/verification-latest.md", repoPath) || "";
+  const failures = report.split(/\r?\n/).filter(line => /^- \[ \] /.test(line));
+  if (!failures.length) throw new Error("No current verification failures to fix. Run verification first.");
+  const state = await readProjectFile("PROJECT_STATE.md", repoPath) || "";
+  return `You are fixing deterministic verification failures in a time-boxed hackathon project.\n\nRead AGENTS.md and .architect/PROJECT_STATE.md before editing.\n\nCURRENT PROJECT STATE:\n${state}\n\nCURRENT VERIFICATION FAILURES:\n${failures.join("\n")}\n\nRules:\n- Fix only the current verification failures listed above.\n- Do not add features, change project scope, or start the next milestone.\n- Do not introduce new dependencies or architecture unless essential to these failures.\n- Do not write credentials into project files or logs.\n- Run relevant checks and update .architect/reports/latest.md with factual results.\n`;
+}
+
+export async function startExecution(mode: "milestone" | "fix" = "milestone") {
   const state = getExecutionState();
   if (state.running) throw new Error("Codex is already running.");
   const config = await getProjectConfig();
@@ -178,14 +189,15 @@ export async function startExecution() {
   state.exitCode = null;
   state.verificationOk = null;
   state.status = null;
+  state.mode = mode;
   state.activities = [];
   state.finalMessage = null;
-  push("info", "Starting Codex for the current milestone.");
+  push("info", mode === "fix" ? "Starting Codex to fix verification failures." : "Starting Codex for the current milestone.");
 
   let prompt: string;
   let previousLatest: string | null;
   try {
-    prompt = await readExecutionPrompt(config.repoPath);
+    prompt = mode === "fix" ? await readFixPrompt(config.repoPath) : await readExecutionPrompt(config.repoPath);
     previousLatest = await readProjectFile("reports/latest.md", config.repoPath);
   } catch (error) {
     state.running = false;
@@ -277,12 +289,15 @@ export async function startExecution() {
       await writeProjectFile("reports/verification-latest.md", verificationReport, config.repoPath);
 
       state.status = code === 0 && verification.ok ? "passed" : "failed";
-      state.finalMessage = state.status === "passed" ? "Milestone execution finished and verification passed." : "Milestone execution finished with failures.";
+      state.finalMessage = mode === "fix"
+        ? state.status === "passed" ? "Verification repair finished and checks passed; review milestone acceptance separately." : "Verification repair finished with failures."
+        : state.status === "passed" ? "Milestone execution finished and verification passed." : "Milestone execution finished with failures.";
       const summary = [
         "# Latest Execution",
         "",
         `Generated: ${new Date().toISOString()}`,
         `Status: ${state.status}`,
+        `Mode: ${mode}`,
         `Codex exit code: ${code ?? 1}`,
         `Deterministic verification: ${verification.ok ? "passed" : "failed"}`,
         "",
