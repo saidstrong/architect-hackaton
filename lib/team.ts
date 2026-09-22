@@ -126,7 +126,7 @@ function globMatches(pattern: string, file: string) {
   const escaped = pattern.replace(/\\/g, "/").replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*\*/g, "\u0000").replace(/\*/g, "[^/]*").replace(/\u0000/g, ".*");
   return new RegExp(`^${escaped}$`).test(file.replace(/\\/g, "/"));
 }
-function scopeWarnings(task: TeamTask, tasks: TeamTask[], files: string[]): ScopeWarning[] {
+export function scopeWarnings(task: TeamTask, tasks: TeamTask[], files: string[]): ScopeWarning[] {
   const warnings: ScopeWarning[] = [];
   for (const file of files) {
     if (task.avoidPaths.some(pattern => globMatches(pattern, file))) warnings.push({ path:file, reason:"Task avoid path" });
