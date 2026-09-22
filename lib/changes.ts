@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { getProjectConfig, readProjectFile, writeProjectFile } from "@/lib/project";
 import { getHackathonTimer } from "@/lib/hackathon-timer";
+import { getTeamSnapshot } from "@/lib/team";
 
 export type ChangeStatus = "Pending" | "Approved" | "Deferred" | "Rejected";
 export type ChangeProposal = {
@@ -9,6 +10,12 @@ export type ChangeProposal = {
   currentMilestone: string; placement: string; impact: string; complexity: "Small" | "Medium" | "Large";
   newDependency: string; architectureChange: string; deadlineRisk: "Low" | "Medium" | "High";
   recommendation: string;
+  teamImpact?: {
+    workers: { id:string; name:string; status:string; task:string }[];
+    affectedTasks: { id:string; title:string; status:string }[];
+    unaffectedTasks: string[];
+    suggestion: string;
+  };
 };
 const changesPath = path.join(process.cwd(), ".architect-runtime", "changes.json");
 
@@ -34,7 +41,7 @@ function safeTitle(text: string) {
   return text.replace(/\s+/g, " ").replace(/[\r\n#*]/g, " ").trim().slice(0, 90);
 }
 
-export async function proposeChange(text: string): Promise<ChangeProposal> {
+export async function proposeChange(text: string, teamMode = false): Promise<ChangeProposal> {
   const config = await getProjectConfig();
   if (!config) throw new Error("No target repository selected.");
   const idea = text.trim();
@@ -58,6 +65,21 @@ export async function proposeChange(text: string): Promise<ChangeProposal> {
     complexity, newDependency, architectureChange, deadlineRisk,
     recommendation: "Finish the current milestone. Review this idea for a later milestone; no active work is interrupted.",
   };
+  if (teamMode) {
+    const team = await getTeamSnapshot();
+    const words = new Set(idea.toLowerCase().match(/[a-z]{3,}/g)?.filter(word => !["add", "the", "for", "with", "after", "later", "replace", "from", "into", "task", "feature"].includes(word)) || []);
+    const affected = team.tasks.filter(task => task.status !== "integrated" && [...words].some(word => `${task.title} ${task.objective}`.toLowerCase().includes(word)));
+    const free = team.workers.find(worker => worker.status === "idle" && !worker.currentTaskId);
+    proposal.teamImpact = {
+      workers:team.workers.map(worker => ({ id:worker.id, name:worker.name, status:worker.status, task:team.tasks.find(task => task.id === worker.currentTaskId)?.title || "No current task" })),
+      affectedTasks:affected.map(task => ({ id:task.id, title:task.title, status:task.status })),
+      unaffectedTasks:team.tasks.filter(task => !affected.includes(task)).map(task => task.title),
+      suggestion: affected.length && /\b(?:replace|remove|cancel)\b/i.test(idea)
+        ? "Review affected assignments. Defer or replace tasks manually after approval; no task is cancelled automatically."
+        : free ? `Queue a scoped task for ${free.name} after approval; confirm dependencies before work starts.`
+        : "Queue a scoped task after current assignments; confirm owner and dependencies before work starts.",
+    };
+  }
   const items = await allChanges();
   items.unshift(proposal);
   await saveChanges(items);

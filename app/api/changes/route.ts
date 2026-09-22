@@ -7,7 +7,7 @@ export async function GET() { return NextResponse.json({ changes: await listChan
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    if (body.action === "propose" && typeof body.text === "string") return NextResponse.json({ change: await proposeChange(body.text) });
+    if (body.action === "propose" && typeof body.text === "string") return NextResponse.json({ change: await proposeChange(body.text, body.teamMode === true) });
     if (body.action === "decide" && typeof body.id === "string" && ["Approved", "Deferred", "Rejected"].includes(body.status)) {
       const execution = await getExecutionStatus();
       return NextResponse.json({ change: await decideChange(body.id, body.status, execution.running || Boolean(execution.blocked)) });

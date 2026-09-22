@@ -61,12 +61,27 @@ AGENTS.md
 ├── DECISIONS.md
 ├── HOURLY_LOG.md
 ├── requests/
+├── team/
+│   └── state.json          # created only when Team Mode is used
 ├── reports/
 │   └── latest.md
 └── evidence/
 ```
 
-The control application itself stores only the currently selected local repository path.
+Architect also keeps local runtime settings such as the selected project, timer, and change proposals outside the target repository. The optional Solo/Team switch is stored in this browser for each project.
+
+## Optional Team Mode (Stage A)
+
+Solo is the default and retains the existing milestone run workflow. Team Mode adds three editable worker records, scoped task assignments, dependencies, worker-reported verification, and local Git branch inspection. It does not launch Codex on teammate devices or synchronize state automatically.
+
+For a manual three-device workflow:
+
+1. Create a task in Team with a task-specific branch name, owner, scope, and acceptance criteria. Architect records the current local `main` or `master` commit as its base. It does not create the branch.
+2. Commit and push `.architect/team/state.json` in the target repository when the assignment is ready to share. Teammates pull that commit and create or fetch their task branches on their own devices. Keep credentials in each device's local environment.
+3. The worker updates the task status and reports a commit and verification result through Architect on the shared project checkout, or coordinates those state edits manually through Git. Avoid concurrent edits to `state.json`; Stage A has no multi-device live synchronization or conflict resolution.
+4. Fetch task branches locally to inspect changed paths and scope warnings. Review an outdated base before integration. Merge and verify through Git outside Architect. **Mark integrated** succeeds only when the reported task commit is on its task branch, descends from the recorded base, and is present on local `main` or `master`.
+
+Branch work is shown separately from integrated project progress. Change proposals can show team impact, but applying a proposal does not cancel or create team tasks. Those changes require explicit Team actions.
 
 ## Codex execution
 
