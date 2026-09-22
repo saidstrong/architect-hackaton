@@ -109,6 +109,16 @@ export default function Home() {
     }
   }
 
+  function chooseAnotherProject() {
+    if (fileDirty && !confirm("Discard unsaved changes?")) return;
+    setConfig(null);
+    setRepoPath("");
+    setActiveFile("PROJECT_STATE.md");
+    setFileDirty(false);
+    setAudit(null);
+    setError("");
+  }
+
   async function createDryRun() {
     setCreatingDryRun(true); setError("");
     try {
@@ -219,6 +229,7 @@ export default function Home() {
       </div>
       <div className="top-actions">
         <span className={`status-pill ${execution.running ? "working" : execution.blocked ? "blocked" : "ready"}`}><i/>{execution.running ? "CODEX WORKING" : execution.blocked ? "RECOVERY REQUIRED" : "READY"}</span>
+        <button className="secondary" onClick={chooseAnotherProject} disabled={execution.running || execution.blocked || auditing}>Change repository</button>
         <button className="secondary" onClick={runAuditNow} disabled={auditing}>{auditing ? "Auditing…" : "Final audit"}</button>
         <button className="primary" onClick={runMilestone} disabled={execution.running || execution.blocked}>{execution.running ? "Running…" : "Run milestone"}</button>
       </div>

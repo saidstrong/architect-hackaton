@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { getProjectConfig, readProjectFile, writeProjectFile } from "@/lib/project";
 import { runVerification } from "@/lib/verify";
 import { readLastRun, sameRepo, writeLastRun } from "@/lib/last-run";
+import { targetProcessEnv } from "@/lib/process";
 
 export type Activity = {
   at: string;
@@ -157,6 +158,7 @@ Rules:
 - If a new secret/environment variable is required, DO NOT invent it and DO NOT put secret values in markdown or logs. Create .architect/requests/secret-<NAME>.json containing {"type":"secret","name":"<NAME>","reason":"...","required":true}, then continue any work that is not blocked by it.
 - If a major architecture decision is required, create .architect/requests/approval-<short-name>.json describing the decision and stop that part of the work.
 - Run relevant tests as you work.
+- Install dependencies inside this repository using its package manifest and lockfile. Do not link node_modules to another repository; that makes builds and verification unreliable.
 - Update .architect/PROJECT_STATE.md and .architect/reports/latest.md with factual results.
 - Do not start the next milestone.
 `;
@@ -199,9 +201,9 @@ export async function startExecution() {
   try {
     // On Windows the CLI is usually a .cmd shim, so shell mode is necessary.
     // Keep project text out of shell arguments and send it over stdin instead.
-    child = spawn("codex", ["exec", "--json", "--sandbox", "workspace-write", "-"], {
+    child = spawn("codex", ["exec", "--json", "--sandbox", "workspace-write", "-c", "sandbox_workspace_write.network_access=true", "-"], {
       cwd: config.repoPath,
-      env: process.env,
+      env: targetProcessEnv(),
       shell: process.platform === "win32",
       windowsHide: true,
     });
