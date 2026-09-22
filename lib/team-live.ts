@@ -44,9 +44,9 @@ export async function report(id:WorkerId,input:unknown) {
       assigned:["received","action_required"],
       received:["working","failed","action_required"],
       working:["verifying","failed","action_required"],
-      verifying:["committing","blocked","failed"],
+      verifying:["committing","blocked","failed","action_required"],
       committing:["pushing","action_required","failed"],
-      pushing:["ready_for_review","local_result_ready","failed"],
+      pushing:["ready_for_review","local_result_ready","failed","action_required"],
     };
     if(dispatch.phase!==data.phase && !allowed[dispatch.phase]?.includes(data.phase)) throw new Error("Invalid worker phase transition.");
     const commit=data.commit||dispatch.commit;
