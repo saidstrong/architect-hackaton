@@ -19,9 +19,24 @@ async function packageScripts(repoPath: string): Promise<{ scripts: Record<strin
 }
 
 async function gitSecretCheck(repoPath: string): Promise<VerificationCheck> {
-  const result = await runCommand("git", ["diff", "--cached", "--", "."], repoPath);
-  const risky = /(sk-[A-Za-z0-9_-]{12,}|(?:api[_-]?key|secret|token)\s*[=:]\s*["']?[A-Za-z0-9_\-]{12,})/i.test(result.stdout);
-  return { name: "Secret scan", ok: result.exitCode === 0 && !risky, detail: risky ? "Potential secret detected in staged diff." : undefined };
+  const result = await runCommand("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], repoPath);
+  if (result.exitCode !== 0) return { name: "Secret scan", ok: false, detail: "Could not list Git-trackable files." };
+  const secretPattern = /(sk-[A-Za-z0-9_-]{12,}|(?:api[_-]?key|secret|token)\s*[=:]\s*["']?[A-Za-z0-9_\-]{12,})/i;
+  let checked = 0;
+  for (const file of result.stdout.split("\0").filter(Boolean)) {
+    const fullPath = path.join(repoPath, file);
+    try {
+      if (!(await fs.lstat(fullPath)).isFile()) continue;
+      checked++;
+      if (secretPattern.test(await fs.readFile(fullPath, "utf8"))) {
+        return { name: "Secret scan", ok: false, detail: "Potential secret detected in a Git-trackable file." };
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      return { name: "Secret scan", ok: false, detail: "Could not inspect a Git-trackable file." };
+    }
+  }
+  return { name: "Secret scan", ok: true, detail: `Scanned ${checked} Git-trackable file(s).` };
 }
 
 export async function runVerification(repoPath: string) {
