@@ -6,7 +6,7 @@ Stage A remains usable without this service. Solo `npm run dev` and `npm run sta
 
 1. Start Architect normally on port 3000 and select a Git target repository.
 2. On a trusted LAN, explicitly start the worker gateway: `ARCHITECT_WORKER_BIND=0.0.0.0 npm run worker:serve` (PowerShell: `$env:ARCHITECT_WORKER_BIND='0.0.0.0'; npm run worker:serve`). Default gateway binding is loopback. The default gateway port is 3101; `ARCHITECT_WORKER_PORT` changes it. `ARCHITECT_LOCAL_PORT` points it to a nondefault local Next port.
-3. In Team, select Worker A, B, or C and generate a connection token. Copy it immediately. Only its SHA-256 hash is stored in an ignored per-project `.architect-runtime/team-live-<project hash>.json` file; the raw token is returned to the local UI once and is not stored in the team state or target Git repository.
+3. In Team, select Worker A, B, or C and generate a connection token. Copy it immediately. The card lists detected IPv4 addresses; choose the one reachable from the worker device. If using a custom gateway port, replace `3101` in that URL. Only the token's SHA-256 hash is stored in an ignored per-project `.architect-runtime/team-live-<project hash>.json` file; the raw token is returned to the local UI once and is not stored in the team state or target Git repository.
 4. When the worker is online and READY, select its READY assignment and press **Dispatch selected task**. There is no automatic queue dispatch.
 
 ## Start on each worker device

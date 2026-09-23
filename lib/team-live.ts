@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { getProjectConfig } from "@/lib/project";
@@ -24,7 +25,7 @@ async function write(value:LiveState) { const file=fileFor(value.repo); await fs
 function hash(token:string) { return createHash("sha256").update(token).digest("hex"); }
 function online(worker:LiveWorker) { return !!worker.lastSeen && Date.now()-Date.parse(worker.lastSeen)<30000; }
 function publicWorker(id:WorkerId, worker:LiveWorker, tasks:TeamTaskView[]) { const task=tasks.find(t=>t.id===worker.dispatch?.taskId); return { id, configured:!!worker.tokenHash, connection:online(worker)?"online":"offline", lastSeen:worker.lastSeen, ready:worker.ready, codex:worker.codex, git:worker.git, stopAfterTask:!!worker.stopAfterTask, dispatch:worker.dispatch?{...worker.dispatch,scopeWarnings:task?scopeWarnings(task,tasks,worker.dispatch.changedPaths||[]):[]}:undefined }; }
-export async function liveSnapshot() { const state=await read(); const team=await getTeamSnapshot(); return { workers:(["A","B","C"] as WorkerId[]).map(id=>publicWorker(id,state.workers[id],team.tasks)) }; }
+export async function liveSnapshot() { const state=await read(); const team=await getTeamSnapshot(); const addresses=Object.values(os.networkInterfaces()).flatMap(items=>items||[]).filter(item=>item.family==="IPv4"&&!item.internal).map(item=>item.address); return { workers:(["A","B","C"] as WorkerId[]).map(id=>publicWorker(id,state.workers[id],team.tasks)), architectUrls:[...new Set(addresses)].map(address=>`http://${address}:3101`) }; }
 export async function generateToken(input:unknown) { const { id }=z.object({id:Id}).strict().parse(input); return serial(async()=>{ const state=await read(); const worker=state.workers[id]; if(worker.dispatch && !["ready_for_review","blocked","failed","local_result_ready","action_required"].includes(worker.dispatch.phase)) throw new Error("Cannot rotate a token during an active assignment."); const token=randomBytes(32).toString("base64url"); state.workers[id]={tokenHash:hash(token)}; await write(state); return {id,token}; }); }
 export async function setStopAfterTask(input:unknown) { const {id,enabled}=z.object({id:Id,enabled:z.boolean()}).strict().parse(input); return serial(async()=>{const state=await read(); state.workers[id].stopAfterTask=enabled; await write(state); return liveSnapshot();}); }
 export async function useManual(input:unknown) { const {id}=z.object({id:Id}).strict().parse(input); return serial(async()=>{const state=await read(); const worker=state.workers[id]; if(worker.dispatch && worker.dispatch.phase!=="assigned") throw new Error("Worker confirmed execution. Coordinate with the teammate before switching this task to manual."); delete worker.dispatch; delete worker.tokenHash; delete worker.lastSeen; worker.ready=false; await write(state); return liveSnapshot();}); }
